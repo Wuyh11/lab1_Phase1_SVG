@@ -25,5 +25,22 @@ export class SvgTransform {
     if (!/^[\s,]*$/.test(source.slice(end))) throw new Error('invalid SVG transform');
     if (![this.scale, this.dx, this.dy].every(Number.isFinite)) throw new Error('invalid SVG transform');
   }
-  apply(shape: Shape): void { shape.scale(this.scale); shape.move(this.dx, this.dy); }
+  apply(shape: Shape, inherited: { fontSize: string; strokeWidth: string }): void {
+    shape.scale(this.scale); shape.move(this.dx, this.dy);
+    if (this.scale !== 1) this.scalePresentation(shape, inherited);
+  }
+  private scalePresentation(shape: Shape, inherited: { fontSize: string; strokeWidth: string }): void {
+    const current = {
+      fontSize: shape.getAttribute('font-size') ?? inherited.fontSize,
+      strokeWidth: shape.getAttribute('stroke-width') ?? inherited.strokeWidth,
+    };
+    if (shape.isContainer) {
+      for (const child of shape.children) this.scalePresentation(child, current);
+    } else {
+      shape.set('stroke-width', String(Numeric.number(current.strokeWidth.replace(/px$/, '')) * this.scale));
+      if (shape.textContent !== undefined) {
+        shape.importAttribute('font-size', String(Numeric.number(current.fontSize.replace(/px$/, '')) * this.scale));
+      }
+    }
+  }
 }

@@ -4,13 +4,13 @@
   "private": true,
   "type": "module",
   "description": "Lab1 Phase 1: object-oriented SVG CLI editor",
-  "engines": { "node": ">=20" },
+  "engines": { "node": ">=20.6" },
   "scripts": {
-    "cli": "tsx src/main.ts",
+    "cli": "node --import tsx src/main.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/main.js",
-    "test": "tsx --test tests/*.test.ts",
-    "check": "tsc --noEmit -p tsconfig.json && tsx --test tests/*.test.ts"
+    "test": "node --import tsx --test tests/*.test.ts",
+    "check": "tsc --noEmit -p tsconfig.json && npm test"
   },
   "dependencies": { "@xmldom/xmldom": "^0.8.11" },
   "devDependencies": { "@types/node": "^20.19.0", "tsx": "^4.20.0", "typescript": "^5.9.0" }

@@ -6,5 +6,5 @@ export class HistoryEntry {
   before(): SvgDocument { return this.previous.clone(); }
   after(): SvgDocument { return this.following.clone(); }
   get message(): string { return this.result; }
-  get commandName(): string { return this.operation.constructor.name; }
+  get commandName(): string { return this.operation.constructor.name.replace(/Command$/, '').toLowerCase(); }
 }

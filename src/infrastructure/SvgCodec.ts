@@ -24,11 +24,11 @@ export class SvgCodec {
     if (root.localName !== 'svg' || (root.namespaceURI && root.namespaceURI !== 'http://www.w3.org/2000/svg')) {
       throw new Error('expected <svg> root');
     }
-    const viewBox = root.getAttribute('viewBox').trim();
+    const viewBox = (root.getAttribute('viewBox') ?? '').trim();
     const view = viewBox ? viewBox.split(/[\s,]+/).map(value => Shape.number(value)) : [];
     if (view.length && (view.length !== 4 || view[0] !== 0 || view[1] !== 0)) throw new Error('unsupported SVG viewBox: expected 0 0 width height');
-    const width = this.dimension(root.getAttribute('width'), view[2] ?? 800);
-    const height = this.dimension(root.getAttribute('height'), view[3] ?? 600);
+    const width = this.dimension(root.getAttribute('width') ?? '', view[2] ?? 800);
+    const height = this.dimension(root.getAttribute('height') ?? '', view[3] ?? 600);
     if (view.length && (view[2] !== width || view[3] !== height)) throw new Error('SVG viewBox must match canvas dimensions');
     const document = new SvgDocument(width, height);
     const elements = this.elements(root);
@@ -41,7 +41,8 @@ export class SvgCodec {
       ids.add(id);
     }
     const warnings: string[] = [];
-    for (const element of elements) document.add(this.decodeShape(element, ids, warnings));
+    if (this.nonWhitespaceText(root)) throw new Error('unexpected text inside <svg>');
+    for (const element of elements) document.add(this.decodeShape(element, ids, warnings, { fontSize: '16', strokeWidth: '1' }));
     // Preserve root presentation/inheritance by applying it to a synthetic group would
     // introduce an unwanted addressable element. Reject explicit root presentation.
     for (let index = 0; index < root.attributes.length; index++) {
@@ -52,7 +53,8 @@ export class SvgCodec {
     }
     return { document, warnings };
   }
-  private decodeShape(element: XmlElement, ids: Set<string>, warnings: string[]): Shape {
+  private decodeShape(element: XmlElement, ids: Set<string>, warnings: string[],
+    inherited: { fontSize: string; strokeWidth: string }): Shape {
     const tag = element.localName;
     if (element.namespaceURI && element.namespaceURI !== 'http://www.w3.org/2000/svg') throw new Error('unsupported XML namespace');
     let id = element.getAttribute('id');
@@ -68,14 +70,16 @@ export class SvgCodec {
       if (!['id', 'transform', 'xmlns'].includes(attribute.name)) shape.importAttribute(attribute.name, attribute.value);
     }
     if (shape instanceof Group) {
-      for (const child of this.elements(element)) shape.insert(this.decodeShape(child, ids, warnings));
+      const current = { fontSize: shape.getAttribute('font-size') ?? inherited.fontSize,
+        strokeWidth: shape.getAttribute('stroke-width') ?? inherited.strokeWidth };
+      for (const child of this.elements(element)) shape.insert(this.decodeShape(child, ids, warnings, current));
       if (this.nonWhitespaceText(element)) throw new Error('unexpected text inside <g>');
     } else {
       if (this.elements(element).length) throw new Error(`unsupported nested content in <${tag}>`);
       if (shape.textContent !== undefined) shape.set('text', element.textContent ?? '');
       else if (this.nonWhitespaceText(element)) throw new Error(`unexpected text inside <${tag}>`);
     }
-    if (element.hasAttribute('transform')) new SvgTransform(element.getAttribute('transform')).apply(shape);
+    if (element.hasAttribute('transform')) new SvgTransform(element.getAttribute('transform') ?? '').apply(shape, inherited);
     return shape;
   }
   private elements(parent: XmlElement): XmlElement[] {
