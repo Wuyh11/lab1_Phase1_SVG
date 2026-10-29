@@ -49,6 +49,7 @@ export abstract class Shape {
   }
 
   move(dx: number, dy: number): void {
+    if (![dx, dy].every(Number.isFinite)) throw new Error('move offsets must be finite');
     for (const key of this.horizontal) this.set(key, String(Number(this.attributes.get(key)) + dx));
     for (const key of this.vertical) this.set(key, String(Number(this.attributes.get(key)) + dy));
   }

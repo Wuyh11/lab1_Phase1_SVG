@@ -24,7 +24,7 @@ export class Group extends Shape {
     this.items.splice(index, 1);
     return index;
   }
-  override move(dx: number, dy: number): void { for (const child of this.items) child.move(dx, dy); }
+  override move(dx: number, dy: number): void { super.move(dx, dy); for (const child of this.items) child.move(dx, dy); }
   override scale(factor: number): void {
     super.scale(factor);
     for (const child of this.items) child.scale(factor);
