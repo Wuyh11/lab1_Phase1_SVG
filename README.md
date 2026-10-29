@@ -43,4 +43,4 @@ npm start < examples/flowchart.commands
 
 ## 提交说明
 
-向课程平台上传本文件 `README.md`。仓库内保留分阶段提交，并在最终提交打 `final` 标签。仓库当前为私有，评阅者需要仓库读取权限。
+向课程平台上传本文件 `README.md`。仓库内保留分阶段提交，并在最终提交打 `final` 标签。仓库已公开，评阅者可直接访问。

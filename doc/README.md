@@ -117,7 +117,7 @@ npm run cli < examples/flowchart.commands
 
 仓库：https://github.com/Wuyh11/lab1_Phase1_SVG
 
-最终标签：`final`。根目录 `README.md` 可独立上传至课程平台，其中包含仓库地址；本文件满足题目要求的 `doc/README.md` 文档位置。仓库为私有，需要向评阅者提供读取权限。
+最终标签：`final`。根目录 `README.md` 可独立上传至课程平台，其中包含仓库地址；本文件满足题目要求的 `doc/README.md` 文档位置。仓库已公开，评阅者可直接访问。
 
 ```sh
 npm ci
