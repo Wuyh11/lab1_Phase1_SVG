@@ -43,8 +43,7 @@ export class SvgCodec {
     const warnings: string[] = [];
     if (this.nonWhitespaceText(root)) throw new Error('unexpected text inside <svg>');
     for (const element of elements) document.add(this.decodeShape(element, ids, warnings, { fontSize: '16', strokeWidth: '1' }));
-    // Preserve root presentation/inheritance by applying it to a synthetic group would
-    // introduce an unwanted addressable element. Reject explicit root presentation.
+    // Root presentation attributes are not part of the current document model.
     for (let index = 0; index < root.attributes.length; index++) {
       const attr = root.attributes.item(index)!;
       if (!['xmlns', 'width', 'height', 'viewBox', 'id', 'version'].includes(attr.name)) {

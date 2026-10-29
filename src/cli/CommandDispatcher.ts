@@ -15,7 +15,7 @@ import { Arguments } from './Arguments.js';
 
 export class CommandDispatcher {
   private readonly tokenizer = new Tokenizer();
-  // Name dispatch point 1/2. Handler registration becomes a CommandProvider slot later.
+  // TODO: allow plugins to register commands.
   private readonly handlers = new Map<string, { syntax: string; run: (args: Arguments) => string | Promise<string> }>();
   constructor(private readonly editor: Editor) {
     this.register('init', 'init [w] [h]', args => {

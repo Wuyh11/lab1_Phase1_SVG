@@ -1,96 +1,114 @@
-# Lab1 Phase 1：SVG 编辑器
+# Lab1 项目说明
+
+这个作业实现了一个命令行 SVG 编辑器，支持题目要求的六种图形和编辑命令。运行方法和示例放在[根目录 README](../README.md)，这里主要说明代码怎么组织，以及实现过程中做过的修改。
 
 ## 架构方案
 
 ### 模块划分
 
-- `src/domain`：封装图形、组合树、几何运算、唯一 id、父子关系和文档不变量。
-- `src/application`：编辑用例、Command、事务式快照、撤销重做及文件端口。
-- `src/infrastructure`：SVG XML 编解码和本地文件适配器。
-- `src/cli`：分词、参数校验、命令注册、REPL 和文本输出。
-- `src/main.ts`：依赖组装入口。
+代码分成四层，另外由 `main.ts` 把它们接起来。
+
+| 目录 | 负责的内容 |
+|---|---|
+| `src/domain` | 图形、分组、画布，以及移动、缩放和父子关系等操作 |
+| `src/application` | 编辑命令、撤销重做、当前文档和文件读写接口 |
+| `src/infrastructure` | 读写本地文件，解析和生成 SVG |
+| `src/cli` | 拆分输入参数、分发命令、显示结果 |
+
+这样划分主要是想把“怎么输入命令”和“怎么修改图形”分开。例如，以后换成鼠标操作，图形和编辑命令这两部分仍然可以继续使用。
 
 ```plantuml
 @startuml
 package "cli" as CLI
-package "application / commands" as APP
-package "application / ports" as PORT
+package "application" as APP {
+  package "commands" as CMD
+  interface DocumentStore as STORE
+}
 package "domain" as DOMAIN
 package "infrastructure" as INFRA
+component "main.ts" as MAIN
 CLI --> APP
+CMD --> DOMAIN
 APP --> DOMAIN
-APP --> PORT
-INFRA --> PORT
+INFRA --> STORE
 INFRA --> DOMAIN
+MAIN --> CLI
+MAIN --> APP
+MAIN --> INFRA
 @enduml
 ```
 
 ### 设计模式的选择
 
-1. Command：每个编辑命令一个类；通过统一历史管理器执行、撤销和重做。
-2. Composite：`Shape` 是叶子与 `Group` 的共同抽象，组递归执行几何操作。
-3. Memento：编辑前克隆文档，编辑在副本上完成；成功才替换当前文档并记入历史，失败保持原状态。
-4. 工厂与适配器：图形构造集中到 `ShapeFactory`；应用通过文件端口读写，不直接依赖 Node 文件系统。
+**Command** 是这次作业要求使用的模式。`commands/` 下每个编辑命令都有自己的类，比如 `MoveCommand`、`GroupCommand`。CLI 解析参数后创建命令对象，再交给 `Editor` 执行，不在解析输入的地方直接修改图形。
 
-仅两处按名字分派：CLI 命令注册表、图形工厂类型注册表。它们是后续插件化阶段的待重构点；本阶段保持显式注册。
+撤销重做由 `CommandHistory` 管理，并配合 **Memento（备忘录）** 保存文档快照。执行命令前先复制文档，命令在副本上操作。成功后保存前后两个版本；失败则丢弃副本。这样，一条 group 命令即使涉及多个父节点，也能一次撤销，出错时不会只改了一半。
+
+这里选择保存整个文档，是因为它比较容易实现和检查。缺点是每条编辑都要复制图形树，文档很大时会占用较多内存。对于这个阶段的小型示例，先接受这个开销。
+
+图形部分用了 **Composite（组合）**。`Rect`、`Circle` 等图形和 `Group` 都继承 `Shape`，对外提供相同的 move、scale、set 等操作。分组的 move、scale 会继续调用子图形的方法，所以嵌套分组也能整体移动和缩放。
+
+此外，`ShapeFactory` 集中创建图形；`LocalDocumentStore` 通过 `DocumentStore` 接口提供文件读写。前者方便管理六种图形的参数，后者让编辑逻辑不用直接调用文件系统。
+
+按名字查找实现的地方保留了两处：`CommandDispatcher` 的命令表、`ShapeFactory` 的图形类型表。这两处暂时还是写在代码里的，后续做插件化时需要改成注册接口。
 
 ### 依赖方向规则
 
-`domain` 不依赖其他层或 Node IO；`application` 只依赖 domain 和端口；`infrastructure` 实现端口并依赖 domain；`cli` 只消费应用层和自身解析器；入口可以组装所有层。测试可以跨层验收。外层依赖内层，避免领域模型绑定终端或 XML 库。
+- `domain` 不引用其他层，也不读取文件或终端输入。
+- `application` 可以引用 `domain`，文件操作只通过自己定义的 `DocumentStore` 接口。
+- `infrastructure` 实现文件接口，可以引用 `application` 的端口和 `domain`。
+- `cli` 只引用 `application` 和 CLI 自己的解析类。
+- `main.ts` 负责组装，可以引用以上各层。
 
-| 实际文件/目录 | 职责和边界 |
-|---|---|
-| `domain/Shape.ts`、六个图形子类 | 私有字段、属性白名单、几何验证与多态运算；每个类独立文件 |
-| `domain/Group.ts` | Composite：持有子节点，递归 move/scale/clone |
-| `domain/SvgDocument.ts` | 聚合根：画布、唯一 id、查找、分组、循环检查、同级顺序 |
-| `domain/ShapeFactory.ts` | 六种图形构造与 create 参数 schema，唯一的图形类型分派 |
-| `application/commands/` | 十个具体编辑 Command，加抽象 Command；参数由对象封装 |
-| `application/CommandHistory.ts`、`HistoryEntry.ts` | Command 执行、Memento 快照、undo/redo、IO 屏障 |
-| `application/Editor.ts` | 当前文档、关联路径与用例协调；不向前端暴露可修改的文档引用 |
-| `application/DocumentFormatter.ts`、`InputNumber.ts` | 展示模型与数值输入入口，避免 CLI 反向穿透领域层 |
-| `application/ports/DocumentStore.ts` | 文件端口接口，应用层不认识 fs 或 XML 解析器 |
-| `infrastructure/LocalDocumentStore.ts` | UTF-8 本地文件、同目录临时文件后 rename、失败清理 |
-| `infrastructure/SvgCodec.ts`、`SvgTransform.ts` | XML 编解码、补 id、SVG 变换规范化；不包含 CLI 命令 |
-| `cli/Tokenizer.ts`、`Arguments.ts` | 引号、转义、注释、参数个数与尾部 in 子句 |
-| `cli/CommandDispatcher.ts`、`Repl.ts` | 唯一的命令名分派、逐行串行 await、终端输入输出 |
-| `main.ts` | 唯一组装入口，注入 LocalDocumentStore |
+这样做是为了让图形操作不依赖 Node 文件接口、XML 解析库或某种输入方式。测试文件需要直接检查各层，可以跨层引用。
 
 ### 变化点假设
 
-- 新增图形：保留抽象 Shape 和集中工厂，后续再增加 ShapeProvider 插槽，本阶段不实现 box。
-- GUI/agent 输入：CLI 只负责解析，编辑命令可由其他前端直接调用。
-- 新存储：通过文件端口替换本地存储。
-- 大文档撤销性能：先用完整快照保证原子性；本阶段不做复杂的增量补丁，代价是历史空间随文档大小增长。
+后面比较可能变化的是图形种类和输入方式。新增图形可以继承 `Shape`，再补充工厂注册；本阶段没有实现题目后续阶段的 box。换成 GUI 或 agent 输入时，可以复用已有的 Command。
+
+文件保存方式也可能变化，所以保留了 `DocumentStore` 接口。至于大文档的撤销性能，目前没有做增量记录，等到有实际需要时再把完整快照换成变化记录。
 
 ## 过程记录
 
-- 2026-10-29：读取原始说明，确认本阶段仅六种内置图形；box 为后续目标，不能把示例 B 当成本阶段需求。
-- 2026-10-29：初始目录只有作业说明，尚无 Git 仓库；先记录架构再实现，使用实际分阶段提交。
-- 2026-10-29：选用事务式快照处理跨父节点 group、非法循环和导入失败，避免命令部分失败后污染状态。
-- 2026-10-29：实现后检查到 CLI 直接导入 Shape 的数字解析方法，违反初始依赖规则；新增应用层 InputNumber 入口，并用自动依赖检查防止回归。
-- 2026-10-29：首次严格编译暴露 XML 库 getAttribute 的可空类型，补齐缺省值处理。tsx 独立命令在受限环境创建 IPC 管道失败，改用 Node 的 `--import tsx` 入口，验证真实子进程启动成功。
-- 2026-10-29：首轮功能测试 35/36 通过；唯一失败是测试把 `g#b` 匹配进 `g#before`，改成完整子树精确断言后通过，领域代码无须为此修改。
-- 2026-10-29：检查外部 SVG transform 时发现仅乘几何坐标会漏掉字形大小和线宽，补充继承样式缩放与专门回归测试。CLI 的 scale 仍严格只改题目规定的几何属性。
-- 2026-10-29：加入真实 CLI 子进程回放、文件权限失败和架构检查，最终 39 项测试通过；交互终端确认启动横幅、`svg>` 提示符、读取示例及 show 输出正常。
+实现时使用了 Codex 辅助搭建类结构、编写命令和测试。下面几处修改对最终代码影响比较大。
 
-### 语义补充与修订记录
+### 撤销时保存什么
 
-题目未明确 group 跨父节点时新组应放哪里，采用以下可重复规则：同父节点时在最早选中节点的位置插入新组；跨父节点时新组归根，在根级选中节点的最早槽位插入，若没有根级选中节点则追加。组内顺序始终采用操作前的文档先序顺序，不受参数排列影响。原有坐标不变。undo 一次恢复所有来源父节点与位置。
+分组涉及从不同位置取出图形，再放进新的容器。如果每个命令分别写一套反向操作，容易漏掉原来的父节点或顺序。因此这里采用文档快照：undo 恢复编辑前的版本，redo 恢复编辑后的版本。测试中也检查了分组和删除容器都只占一个撤销步骤。
 
-题目要求根级容器禁止 ungroup，本实现遵循该规则；只能解散嵌套 g。普通 g 的 set 修改组属性，使用 SVG 原生样式继承，不把 fill 写入每个子节点；它与后续 box 的领域属性传播有不同的职责。
+### CLI 对图形类的依赖
 
-显示类与 canvas 查询保留历史；init/read/save 成功、canvas 修改成功才清空历史并锁定 undo/redo。任何失败不清空历史，不更新关联路径；下一条成功编辑创建新的历史。save 成功后记住保存路径，后续省略路径保存到最近一次成功读写的文件。
+早期 CLI 为了解析数字，直接引用了 `Shape` 的数值解析方法。这样虽然能运行，但不符合前面约定的依赖方向。后来加了应用层的 `InputNumber`，让 CLI 通过它解析数字，并加了一项源码依赖检查，防止后面又引入类似的引用。
 
-无方案目录变更；新增 InputNumber、SvgTransform 是既有模块内部的职责细化。两处注册表仍是后续插件阶段的待重构项；本阶段没有提前实现 box 或动态插件。
+### 一个测试断言的问题
+
+首轮测试有一项失败：测试想检查 `g#a` 是否排在 `g#b` 前面，但字符串查找把 `g#b` 匹配到了 `g#before` 里面。后来改为比较完整子树的输出。这次修改只改了测试，分组的实现没有跟着改。
+
+### 读取带 transform 的 SVG
+
+一开始把 SVG 的缩放换算到坐标时，只处理了位置和尺寸，漏了文字大小和线宽。后来补上了这部分，也加了嵌套变换和继承样式的测试。导入时的变换处理，与 CLI 的 scale 是分开的：CLI scale 仍然只缩放题目规定的几何属性。
+
+另外，XML 库的 `getAttribute` 可能返回 null，编译检查后补上了处理；启动方式改为 `node --import tsx`，解决了受限环境下 tsx 启动时的管道权限问题。
+
+### 几处题目没有展开的细节
+
+分组内的顺序按原文档的顺序保留，不按命令参数重新排序。同一个父节点下分组时，新组放在最早被选中图形的位置。跨父节点分组时，新组放到画布根下；如果选中了根级图形，就放在其中最早的位置，否则放在最后。undo 会恢复各图形原来的位置。
+
+按照题目要求，根级 g 不能 ungroup，嵌套 g 才能解散。对 g 设置 fill 等属性时，使用 SVG 自带的样式继承。
+
+init、read、save 和修改画布尺寸成功后，会清空撤销历史。查询画布尺寸和显示类命令保留历史，失败的命令也不会清空历史。保存成功后记住这次的文件路径，下一次 save 可以省略路径。
 
 ## 一致性自查
 
-1. **模块划分**：实际目录与方案一致。所有生产类均一类一文件，文件名与类名一致；图形为行为丰富的类层次，私有字段保存状态。输入只生成 Command，几何/层级操作由领域模型执行，没有到处 switch(tag)。文件端口是接口，Token 与变换继承参数是不可变类型值，不承担领域行为。
-2. **依赖方向**：`tests/architecture.test.ts` 遍历生产源码的 import，检查各层允许依赖和内层禁止外部库；同时检查一类一文件及禁止 switch。抽样：`Rect → Shape`、`MoveCommand → Command/SvgDocument`、`Editor → DocumentStore`、`LocalDocumentStore → DocumentStore/SvgCodec`、`CommandDispatcher → Editor/具体 Command/InputNumber`，均符合规则。该静态检查随 `npm test` 执行，最终通过。
+实际目录与前面的划分一致。每个类单独放在同名文件中；图形类负责自己的几何操作，Group 负责递归处理子节点。后来增加的 `InputNumber` 和 `SvgTransform` 仍放在各自所属的层内，没有新增一层。
+
+依赖方向通过 `tests/architecture.test.ts` 检查。它会扫描源码的 import，检查各层能引用哪些目录，也会检查类名与文件名是否一致、是否出现 switch。抽样看，`Rect` 只引用 `Shape`，`MoveCommand` 引用 `Command` 和 `SvgDocument`，`Editor` 通过 `DocumentStore` 读写文件，符合方案。
+
+目前没有发现违反这些依赖规则的引用。命令表和图形类型表仍是后续插件阶段需要修改的地方。
 
 ## 质量保证手段
 
-2026-10-29 在本机 Node.js 20.20.2 实际执行：
+在 Node.js 20.20.2 下运行了下面的检查，类型检查和编译通过，39 项测试全部通过。
 
 ```sh
 npm run check
@@ -98,30 +116,19 @@ npm run build
 npm run cli < examples/flowchart.commands
 ```
 
-- 严格 TypeScript 类型检查、构建通过；自动化测试 **39/39 通过**。
-- `tests/editor.test.ts`：覆盖全部命令与六种类型、in 子句、id 冲突、非法父节点/循环、分组顺序、递归删除、同级 front/back、文本引号、参数错误、负尺寸、数值溢出和事务原子性。
-- `tests/svg.test.ts`：题目 other.svg 七元素导入、预留后置显式 id 后再自动补 id、Unicode/XML 转义、保存读回、嵌套变换和继承样式、错误 XML/未知图形/不支持属性拒绝；真实磁盘读写及只读失败后原文件保留、临时文件清理。
-- `tests/cli.test.ts`：启动真实 CLI 子进程，一次管道输入含 read/save/编辑/错误恢复，核对输出和最终磁盘 SVG，确认异步 IO 没有与下一条命令竞态，EOF 正常退出。
-- `tests/architecture.test.ts`：自动检查依赖方向、一类一文件及不存在 switch。
-- `examples/flowchart.commands` 实际生成 `examples/flowchart.svg`（8 元素），完整输出保存在 `examples/flowchart.transcript.txt`；另用交互 TTY 核对提示符和读取后的属性。SVG 已通过 XML 解析和保存读回检查；未将浏览器视觉渲染计为已完成的验证。
+测试大致分为四部分：
 
-### 范围与代价
+| 测试文件 | 主要检查内容 |
+|---|---|
+| `editor.test.ts` | 六种图形和各条命令、分组顺序、循环嵌套、撤销重做、错误后文档是否保持原样 |
+| `svg.test.ts` | 缺 id 的文件、文字转义、保存后读回、嵌套变换、错误 XML 和文件写入失败 |
+| `cli.test.ts` | 启动 CLI 子进程，连续输入命令，检查 read/save 的执行顺序和最后生成的 SVG |
+| `architecture.test.ts` | 模块引用关系、一类一文件、没有 switch 分派 |
 
-- 支持 rect/circle/ellipse/line/text/g；其他元素明确报错，box 按要求返回 unknown shape type。
-- SVG 导入支持本作业的几何和样式子集、常用文本展示属性、translate/正数等比 scale。变换会规范化到几何与必要的字形/线宽属性。旋转、斜切、非等比 scale、path、tspan、CSS style、百分比/相对单位、非零原点或不同尺寸的 viewBox 不在本阶段范围，遇到后报错而不部分导入。
-- 保存输出规范化的 SVG，不保留原 XML 排版、注释或 processing instruction；缺失 id 会补齐并警告。显示文本可能与题目示例的空格排版不同，包含同等的关键属性。
-- 快照历史时间/空间约为每条编辑 O(N)，适合本阶段小型图形；超大文档的补丁历史和 id 索引属于未来优化。
-- 未添加额外人工使用结果；自动测试通过不等同于覆盖所有第三方 SVG。
+另外从 GitHub 重新克隆了一份，执行 `npm ci` 后再次检查，并运行编译后的 CLI，生成的流程图与仓库中的示例一致。交互终端中也检查了提示符、read 和 show。SVG 做过解析和保存后读回检查，尚未做浏览器中的视觉检查。
 
-## 使用与提交
+### 目前的限制
 
-仓库：https://github.com/Wuyh11/lab1_Phase1_SVG
+编辑器支持的是题目要求的 SVG 子集。导入时支持六种内置元素、常用文字样式、平移和正数等比缩放；不支持 path、tspan、CSS style、旋转、斜切、非等比缩放，以及百分比等相对单位。viewBox 需要从原点开始，并与画布尺寸一致。遇到不支持的内容会报错。
 
-最终标签：`final`。根目录 `README.md` 可独立上传至课程平台，其中包含仓库地址；本文件满足题目要求的 `doc/README.md` 文档位置。仓库已公开，评阅者可直接访问。
-
-```sh
-npm ci
-npm run cli
-```
-
-输入 help 查看全部语法，Ctrl+D 结束。构建后可 `npm start`。项目依赖使用 lockfile 固定，并通过项目级 `.npmrc` 选择官方 npm 源，不改动本机全局 npm 配置。
+保存后不会保留原文件的排版和注释。撤销使用完整快照，大文档的时间和内存开销也还需要优化。

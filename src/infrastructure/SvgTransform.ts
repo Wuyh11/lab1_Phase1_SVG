@@ -13,8 +13,7 @@ export class SvgTransform {
       if (!/^[\s,]*$/.test(source.slice(end, match.index))) throw new Error('invalid SVG transform');
       const args = match[2]!.trim().split(/[\s,]+/).filter(Boolean).map(value => Numeric.number(value));
       const name = match[1]!;
-      // This is syntax parsing, not shape-type dispatch. Unsupported transforms are
-      // rejected instead of silently changing imported geometry.
+      // Reject transforms that cannot be represented by the supported geometry.
       if (name === 'translate' && args.length >= 1 && args.length <= 2) {
         this.dx += this.scale * args[0]!; this.dy += this.scale * (args[1] ?? 0);
       } else if (name === 'scale' && args.length >= 1 && args.length <= 2 && (args[1] ?? args[0]) === args[0] && args[0]! > 0) {

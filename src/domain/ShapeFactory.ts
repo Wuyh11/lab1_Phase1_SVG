@@ -7,7 +7,7 @@ import { Text } from './Text.js';
 import { Group } from './Group.js';
 
 export class ShapeFactory {
-  // Name dispatch point 2/2. Replace with ShapeProvider registration in the plugin phase.
+  // TODO: register ShapeProviders when plugin support is added.
   private readonly types = new Map<string, { build: (id: string) => Shape; required: readonly string[]; optional?: string }>([
     ['rect', { build: id => new Rect(id), required: ['x', 'y', 'width', 'height'], optional: 'fill' }],
     ['circle', { build: id => new Circle(id), required: ['cx', 'cy', 'r'], optional: 'fill' }],
